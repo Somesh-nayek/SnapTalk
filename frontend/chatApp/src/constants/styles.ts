@@ -1,0 +1,1 @@
+export const statusbutton="w-4 h-4"

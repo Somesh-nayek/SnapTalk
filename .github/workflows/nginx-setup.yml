@@ -1,0 +1,51 @@
+name: Nginx Setup
+on:
+  workflow_run:
+    workflows: ["Deploy ChatApp"]
+    types:
+      - completed
+    branches:
+      - main
+jobs:
+  setup-nginx:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' && secrets.VM_DOMAIN != '' }}
+    steps:
+    - name: Configure Nginx and SSL
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.VM_IP }}
+        username: ${{ secrets.VM_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          # Install Nginx and certbot if not installed
+          if ! command -v nginx &> /dev/null; then
+            sudo apt update
+            sudo apt install -y nginx certbot python3-certbot-nginx
+          fi
+
+          # Create Nginx config for ChatApp
+          sudo tee /etc/nginx/sites-available/chatapp << EOF
+          server {
+              listen 80;
+              server_name ${{ secrets.VM_DOMAIN }};
+
+              location / {
+                  proxy_pass http://localhost:80;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+              }
+              location /ws {
+                  proxy_pass http://localhost:8080;
+                  proxy_set_header Host \$host;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade \$http_upgrade;
+                  proxy_set_header Connection "Upgrade";
+              }
+          }
+          EOF
+
+           # Enable site and get SSL certificate
+            sudo ln -sf /etc/nginx/sites-available/chatapp /etc/nginx/sites-enabled/
+            sudo nginx -t && sudo systemctl reload nginx
+            sudo certbot --nginx -d ${{ secrets.VM_DOMAIN }} --non-interactive --agree-tos -m ${{ secrets.ADMIN_EMAIL }}

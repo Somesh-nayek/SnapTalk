@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: chat-backend
+    ports: 
+      - "8080:8080"
+    restart: unless-stopped
+    networks:
+      - chat-network
+  
+  frontend:
+    build:
+      context: ./frontend/chatApp
+    container_name: chat-frontend
+    ports:
+      - "80:80"
+    environment:
+      - VITE_WS_URL=${WS_URL:-ws://backend:8080}
+    depends_on:
+      - backend
+    networks:
+      - chat-network
+networks:
+  chat-network:
+    driver: bridge
+

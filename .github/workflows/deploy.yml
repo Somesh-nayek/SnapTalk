@@ -1,0 +1,51 @@
+name: Deploy ChatApp
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: setup SSH key
+      uses: webfactory/ssh-agent@v0.7.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    
+    - name: Add host key to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+    
+    - name: Deploy to VM
+     uses: appleboy/ssh-action@master
+     with:
+       host: ${{ secrets.VM_IP }}
+       username: ${{ secrets.VM_USER }}
+       key: ${{ secrets.SSH_PRIVATE_KEY }}
+       script: |
+         mkdir -p ~/chat-app
+         cd ~/chat-app
+         #Clone or pull latest code
+         if [ -d .git ]; then
+            git pull
+         else
+            git clone ${{ github.server_url }}/${{ github.repository }} .
+         fi
+
+         #Set WebSocket URL based on VM's IP or domain
+         if [ -n "${{ secrets.VM_DOMAIN }}" ]; then
+           export WS_URL="wss://${{ secrets.VM_DOMAIN }}"
+         else
+           export WS_URL="ws://${{ secrets.VM_IP }}"
+         fi
+         
+         #Deploy with Docker Compose
+         docker-compose down
+         docker-compose build --no-cache
+         docker-compose up -d
+          
+     
