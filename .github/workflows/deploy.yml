@@ -19,31 +19,38 @@ jobs:
       run: |
         mkdir -p ~/.ssh
         ssh-keyscan -H ${{ secrets.VM_IP }} >> ~/.ssh/known_hosts
+    - name: Install Docker Compose
+      run: |
+        sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        sudo chmod +x /usr/local/bin/docker-compose
+        docker-compose --version
     
     - name: Deploy to VM
       uses: appleboy/ssh-action@master
       with:
-        host: ${{ secrets.VM_IP }}
-        username: ${{ secrets.VM_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        script: |
-          mkdir -p ~/chat-app
-          cd ~/chat-app
-          # Clone or pull latest code
-          if [ -d .git ]; then
+       host: ${{ secrets.VM_IP }}
+       username: ${{ secrets.VM_USER }}
+       key: ${{ secrets.SSH_PRIVATE_KEY }}
+       script: |
+         mkdir -p ~/chat-app
+         cd ~/chat-app
+         #Clone or pull latest code
+         if [ -d .git ]; then
             git pull
-          else
+         else
             git clone ${{ github.server_url }}/${{ github.repository }} .
-          fi
+         fi
 
-          # Set WebSocket URL based on VM's IP or domain
-          if [ -n "${{ secrets.VM_DOMAIN }}" ]; then
-            export WS_URL="wss://${{ secrets.VM_DOMAIN }}/ws"
-          else
-            export WS_URL="ws://${{ secrets.VM_IP }}:8080"
-          fi
+         #Set WebSocket URL based on VM's IP or domain
+         if [ -n "${{ secrets.VM_DOMAIN }}" ]; then
+           export WS_URL="wss://${{ secrets.VM_DOMAIN }}"
+         else
+           export WS_URL="ws://${{ secrets.VM_IP }}"
+         fi
+         
+         #Deploy with Docker Compose
+         docker-compose down
+         docker-compose build --no-cache
+         docker-compose up -d
           
-          # Deploy with Docker Compose
-          docker-compose down
-          docker-compose build --no-cache
-          docker-compose up -d
+     
