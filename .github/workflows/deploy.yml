@@ -1,51 +1,57 @@
-name: Deploy ChatApp
+name: Nginx Setup
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["Deploy ChatApp"]
+    types:
+      - completed
+    branches:
+      - main
 jobs:
-  deploy:
+  setup-nginx:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-    
-    - name: setup SSH key
-      uses: webfactory/ssh-agent@v0.7.0
+    - name: Configure Nginx and SSL
+      uses: appleboy/ssh-action@master
       with:
-        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-    
-    - name: Add host key to known hosts
-      run: |
-        mkdir -p ~/.ssh
-        ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
-    
-    - name: Deploy to VM
-     uses: appleboy/ssh-action@master
-     with:
-       host: ${{ secrets.VM_IP }}
-       username: ${{ secrets.VM_USER }}
-       key: ${{ secrets.SSH_PRIVATE_KEY }}
-       script: |
-         mkdir -p ~/chat-app
-         cd ~/chat-app
-         #Clone or pull latest code
-         if [ -d .git ]; then
-            git pull
-         else
-            git clone ${{ github.server_url }}/${{ github.repository }} .
-         fi
+        host: ${{ secrets.VM_IP }}
+        username: ${{ secrets.VM_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          # Check if domain is configured
+          if [ -z "${{ secrets.VM_DOMAIN }}" ]; then
+            echo "No domain configured, skipping Nginx setup"
+            exit 0
+          fi
+        
+          # Install Nginx and certbot if not installed
+          if ! command -v nginx &> /dev/null; then
+            sudo apt update
+            sudo apt install -y nginx certbot python3-certbot-nginx
+          fi
 
-         #Set WebSocket URL based on VM's IP or domain
-         if [ -n "${{ secrets.VM_DOMAIN }}" ]; then
-           export WS_URL="wss://${{ secrets.VM_DOMAIN }}"
-         else
-           export WS_URL="ws://${{ secrets.VM_IP }}"
-         fi
-         
-         #Deploy with Docker Compose
-         docker-compose down
-         docker-compose build --no-cache
-         docker-compose up -d
-          
-     
+          # Create Nginx config for ChatApp
+          sudo tee /etc/nginx/sites-available/chatapp << EOF
+          server {
+              listen 80;
+              server_name ${{ secrets.VM_DOMAIN }};
+
+              location / {
+                  proxy_pass http://localhost:80;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+              }
+              location /ws {
+                  proxy_pass http://localhost:8080;
+                  proxy_set_header Host \$host;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade \$http_upgrade;
+                  proxy_set_header Connection "Upgrade";
+              }
+          }
+          EOF
+
+          # Enable site and get SSL certificate
+          sudo ln -sf /etc/nginx/sites-available/chatapp /etc/nginx/sites-enabled/
+          sudo nginx -t && sudo systemctl reload nginx
+          sudo certbot --nginx -d ${{ secrets.VM_DOMAIN }} --non-interactive --agree-tos -m ${{ secrets.ADMIN_EMAIL }}
